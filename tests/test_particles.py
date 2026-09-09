@@ -37,7 +37,11 @@ def _write_picks(path: Path, name=f"{STEM}.tomostar", eulers=True, extra=True):
         }
     )
     if eulers:
-        df["rlnAngleRot"], df["rlnAngleTilt"], df["rlnAnglePsi"] = [10.0, -50.0, 0.0], [20.0, 100.0, 90.0], [30.0, 120.0, 0.0]
+        df["rlnAngleRot"], df["rlnAngleTilt"], df["rlnAnglePsi"] = (
+            [10.0, -50.0, 0.0],
+            [20.0, 100.0, 90.0],
+            [30.0, 120.0, 0.0],
+        )
     if extra:
         df["rlnRandomSubset"] = [1, 2, 1]
         df["rlnSomethingElse"] = [0.1, 0.2, 0.3]
@@ -51,7 +55,9 @@ def test_star_import_export_roundtrip(tmp_path, flavour):
     picks = tmp_path / "picks.star"
     df = _write_picks(picks)
     out = tmp_path / "cets" / "warp.cets.json"
-    r = _run(["to-cets", str(project), "-o", str(out), "--drop-locals", "--particles", str(picks), "--coords-angpix", "4.0"])
+    r = _run(
+        ["to-cets", str(project), "-o", str(out), "--drop-locals", "--particles", str(picks), "--coords-angpix", "4.0"]
+    )
     assert "coords_angpix_used = 4.0  [discovered]  (explicit (warp flavour))" in r.stdout
     assert "[ok ] rows_bound value=3 expected=3" in r.stdout
     assert "points lie outside" not in r.stdout + r.stderr or "of 3 points" in r.stderr  # depends on the box
@@ -67,14 +73,34 @@ def test_star_import_export_roundtrip(tmp_path, flavour):
     frame = tomogram_frame(resolved.tomogram)
     expect_corner = df[["rlnCoordinateX", "rlnCoordinateY", "rlnCoordinateZ"]].to_numpy(float) * 4.0
     assert np.allclose(resolved.points_corner_a, expect_corner, atol=1e-6)
-    assert np.allclose(resolved.matrices, zyz_to_matrices(df[["rlnAngleRot", "rlnAngleTilt", "rlnAnglePsi"]].to_numpy(float)), atol=1e-12)
+    assert np.allclose(
+        resolved.matrices,
+        zyz_to_matrices(df[["rlnAngleRot", "rlnAngleTilt", "rlnAnglePsi"]].to_numpy(float)),
+        atol=1e-12,
+    )
     assert np.allclose(frame.corner_a, [float(n // 2) * PIX for n in frame.size_px])
 
     root = tmp_path / "warp_out"
     r = _run(
         [
-            "from-cets", str(out), "-o", str(root), "--particles-out", str(root / "particles"), "--star-flavour", flavour,
-            "--coords-angpix", "2.5", "--frames-dir", str(root / "frames"), "--voltage", "300", "--cs", "2.7", "--amp-contrast", "0.07",
+            "from-cets",
+            str(out),
+            "-o",
+            str(root),
+            "--particles-out",
+            str(root / "particles"),
+            "--star-flavour",
+            flavour,
+            "--coords-angpix",
+            "2.5",
+            "--frames-dir",
+            str(root / "frames"),
+            "--voltage",
+            "300",
+            "--cs",
+            "2.7",
+            "--amp-contrast",
+            "0.07",
         ]
     )
     assert "[ok ] star_roundtrip_positions" in r.stdout and "[ok ] star_roundtrip_rotations" in r.stdout
@@ -102,16 +128,38 @@ def test_m_import_star_binds_with_the_m_pixel_chain(tmp_path):
     project = make_project(tmp_path)
     star = DATA / "m_import_run_data.star"
     out = tmp_path / "cets" / "warp.cets.json"
-    r = _run(["to-cets", str(project), "-o", str(out), "--drop-locals", "--particles", str(star), "--star-flavour", "m"], expect_ok=False)
+    r = _run(
+        ["to-cets", str(project), "-o", str(out), "--drop-locals", "--particles", str(star), "--star-flavour", "m"],
+        expect_ok=False,
+    )
     assert r.exit_code == 1 and "series name(s) are not in the document" in r.stderr
-    r = _run(["to-cets", str(project), "-o", str(out), "--drop-locals", "--particles", str(star), "--star-flavour", "m", "--skip-unknown-series", "--overwrite"])
+    r = _run(
+        [
+            "to-cets",
+            str(project),
+            "-o",
+            str(out),
+            "--drop-locals",
+            "--particles",
+            str(star),
+            "--star-flavour",
+            "m",
+            "--skip-unknown-series",
+            "--overwrite",
+        ]
+    )
     assert "coords_angpix_used = 4.0  [discovered]  (rlnImagePixelSize (m flavour))" in r.stdout
     assert "row(s) of unknown series dropped" in r.stderr
     assert load_dataset(out).regions[0].annotations == []  # none of the excerpt's series is in this project
     # the reader itself against M's table (the CLI just routes it)
     t = read_particle_star(star, "m")
     mt = starfile.read(DATA / "m_species_particles.star")
-    assert np.abs(mt[["wrpCoordinateX1", "wrpCoordinateY1", "wrpCoordinateZ1"]].to_numpy(float) - t.positions_corner_a).max() < 1e-3
+    assert (
+        np.abs(
+            mt[["wrpCoordinateX1", "wrpCoordinateY1", "wrpCoordinateZ1"]].to_numpy(float) - t.positions_corner_a
+        ).max()
+        < 1e-3
+    )
 
 
 def test_star_options_from_config_and_no_orientations(tmp_path):
@@ -119,13 +167,32 @@ def test_star_options_from_config_and_no_orientations(tmp_path):
     picks = tmp_path / "picks.star"
     _write_picks(picks, eulers=False, extra=False)
     cfg = tmp_path / "cets.yaml"
-    cfg.write_text("cets-warpm:\n  to-cets: {coords_angpix: 3.0, star_flavour: warp}\n  from-cets: {coords_angpix: 3.0, series_name_style: stem}\n")
+    cfg.write_text(
+        "cets-warpm:\n  to-cets: {coords_angpix: 3.0, star_flavour: warp}\n  from-cets: {coords_angpix: 3.0, series_name_style: stem}\n"
+    )
     out = tmp_path / "cets" / "warp.cets.json"
-    r = _run(["to-cets", str(project), "-o", str(out), "--drop-locals", "--particles", str(picks), "--config", str(cfg)])
+    r = _run(
+        ["to-cets", str(project), "-o", str(out), "--drop-locals", "--particles", str(picks), "--config", str(cfg)]
+    )
     assert "coords_angpix = 3.0  [config]" in r.stdout and "star_flavour = 'warp'  [config]" in r.stdout
     assert "written as PointSet3D (no orientations)" in r.stderr
     root = tmp_path / "warp_out"
-    r = _run(["from-cets", str(out), "-o", str(root), "--particles-out", str(root / "p"), "--star-flavour", "warp", "--config", str(cfg), "--frames-dir", str(root / "frames")])
+    r = _run(
+        [
+            "from-cets",
+            str(out),
+            "-o",
+            str(root),
+            "--particles-out",
+            str(root / "p"),
+            "--star-flavour",
+            "warp",
+            "--config",
+            str(cfg),
+            "--frames-dir",
+            str(root / "frames"),
+        ]
+    )
     assert "coords_angpix = 3.0  [config]" in r.stdout and "WARNING: coords_angpix defaulted" not in r.stderr
     assert "rlnAngleRot/Tilt/Psi written as 0" in r.stderr
     raw = starfile.read(root / "p" / "warp_warp.star")
@@ -137,9 +204,24 @@ def test_from_cets_without_particles_out_writes_no_star_and_flavour_required(tmp
     picks = tmp_path / "picks.star"
     _write_picks(picks)
     out = tmp_path / "cets" / "warp.cets.json"
-    _run(["to-cets", str(project), "-o", str(out), "--drop-locals", "--particles", str(picks), "--coords-angpix", "4.0"])
+    _run(
+        ["to-cets", str(project), "-o", str(out), "--drop-locals", "--particles", str(picks), "--coords-angpix", "4.0"]
+    )
     root = tmp_path / "warp_out"
     r = _run(["from-cets", str(out), "-o", str(root), "--frames-dir", str(root / "frames")])
     assert not (root / "particles").exists() and "star_roundtrip" not in r.stdout
-    r = _run(["from-cets", str(out), "-o", str(root), "--particles-out", str(root / "p"), "--frames-dir", str(root / "frames"), "--overwrite"], expect_ok=False)
+    r = _run(
+        [
+            "from-cets",
+            str(out),
+            "-o",
+            str(root),
+            "--particles-out",
+            str(root / "p"),
+            "--frames-dir",
+            str(root / "frames"),
+            "--overwrite",
+        ],
+        expect_ok=False,
+    )
     assert r.exit_code == 1 and "star_flavour is required" in r.stderr
