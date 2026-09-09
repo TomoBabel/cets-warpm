@@ -35,7 +35,9 @@ def make_project(root: Path, *, xml_edit=None, with_recon=True, with_averages=Tr
         xml = xml_edit(xml)
     (root / "warp_tiltseries" / f"{STEM}.xml").write_text(xml)
     if with_averages:
-        for line in re.search(r"<MoviePath>(.*?)</MoviePath>", xml, re.S).group(1).strip().split("\n"):
+        m = re.search(r"<MoviePath>(.*?)</MoviePath>", xml, re.S)
+        assert m is not None
+        for line in m.group(1).strip().split("\n"):
             movie = (root / "tomostar" / line.strip()).resolve()
             write_mrc(movie.parent / "average" / (movie.stem + ".mrc"), (1, IMG, IMG), PIX)
     if with_recon:

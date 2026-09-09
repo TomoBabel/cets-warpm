@@ -63,17 +63,19 @@ def mrc_header(path: Path) -> dict:
 def _read_source(path: Path) -> Tuple[Dict[str, str], List[str]]:
     """M ``.source``: ``{Param name: value}`` and the tomostar file names (relative to the .source folder)."""
     root = ElementTree.parse(path).getroot()
-    params = {p.get("Name"): p.get("Value", "") for p in root.findall("Param")}
-    files = [f.get("Name") for f in root.findall("Files/File")]
+    params = {str(p.get("Name")): str(p.get("Value", "")) for p in root.findall("Param")}
+    files = [str(f.get("Name")) for f in root.findall("Files/File") if f.get("Name")]
     return params, files
 
 
 def _read_population(path: Path) -> List[Path]:
     root = ElementTree.parse(path).getroot()
-    return [(path.parent / s.get("Path")).resolve() for s in root.findall("Sources/Source")]
+    return [(path.parent / str(s.get("Path"))).resolve() for s in root.findall("Sources/Source") if s.get("Path")]
 
 
-def enumerate_xmls(tokens: List[str], settings_override: Optional[Path] = None) -> List[Tuple[Path, Optional[Path], Optional[dict]]]:
+def enumerate_xmls(
+    tokens: List[str], settings_override: Optional[Path] = None
+) -> List[Tuple[Path, Optional[Path], Optional[dict]]]:
     """Expand CLI sources to ``(xml_path, settings_path, source_params)`` triples.
 
     Tokens: a project root (``<root>/warp_tiltseries.settings``), a ``.settings`` file, ``.xml`` files or
@@ -154,24 +156,31 @@ def discover_series(
     stem = xml_path.stem
     s = WarpSeries(stem=stem, xml_path=xml_path, settings_path=settings_path)
 
-    settings = WarpSettings.from_file(str(settings_path)) if settings_path and settings_path.exists() else None
-    s.settings = settings
-    acq_pix = None
-    if settings is not None:
+    settings = None
+    if settings_path is not None and settings_path.exists():
+        settings = WarpSettings.from_file(str(settings_path))
+        sname = settings_path.name
         acq_pix = settings.pixel_size_a
-        s.add("pixel_size_acquisition_a", acq_pix, f"{settings_path.name}#Import/PixelSize")
+        s.add("pixel_size_acquisition_a", acq_pix, f"{sname}#Import/PixelSize")
         bin_times = float(settings.get("Import", "BinTimes") or 0.0)
         if acq_pix:
-            s.add("pix", acq_pix * (2.0**bin_times), f"{settings_path.name}#PixelSize x 2^BinTimes")
+            s.add("pix", acq_pix * (2.0**bin_times), f"{sname}#PixelSize x 2^BinTimes")
         if settings.tomo_dims_px and acq_pix:
-            s.add("volume_dims_a", [d * acq_pix for d in settings.tomo_dims_px], f"{settings_path.name}#Tomo/Dimensions x PixelSize")
-            s.add("volume_dims_px_acq", tuple(settings.tomo_dims_px), f"{settings_path.name}#Tomo/Dimensions")
-        s.add("voltage", settings.voltage_kv, f"{settings_path.name}#CTF/Voltage")
-        s.add("cs", settings.cs_mm, f"{settings_path.name}#CTF/Cs")
-        s.add("amp_contrast", settings.amplitude_contrast, f"{settings_path.name}#CTF/Amplitude")
-        s.add("exposure_per_tilt", settings.exposure_per_tilt, f"{settings_path.name}#Import/DosePerAngstromFrame")
+            s.add(
+                "volume_dims_a",
+                [d * acq_pix for d in settings.tomo_dims_px],
+                f"{sname}#Tomo/Dimensions x PixelSize",
+            )
+            s.add("volume_dims_px_acq", tuple(settings.tomo_dims_px), f"{sname}#Tomo/Dimensions")
+        s.add("voltage", settings.voltage_kv, f"{sname}#CTF/Voltage")
+        s.add("cs", settings.cs_mm, f"{sname}#CTF/Cs")
+        s.add("amp_contrast", settings.amplitude_contrast, f"{sname}#CTF/Amplitude")
+        s.add("exposure_per_tilt", settings.exposure_per_tilt, f"{sname}#Import/DosePerAngstromFrame")
         data_folder = settings.data_folder or "tomostar"
         s.tomostar_dir = (settings_path.parent / data_folder).resolve()
+    else:
+        acq_pix = None
+    s.settings = settings
     if source_params:
         p = source_params
         if "PixelSize" in p and acq_pix is None:
@@ -179,7 +188,11 @@ def discover_series(
             s.add("pixel_size_acquisition_a", acq_pix, ".source#PixelSize")
             s.add("pix", acq_pix, ".source#PixelSize (BinTimes unknown)")
         if all(k in p for k in ("DimensionsX", "DimensionsY", "DimensionsZ")) and acq_pix:
-            s.add("volume_dims_a", [float(p[k]) * acq_pix for k in ("DimensionsX", "DimensionsY", "DimensionsZ")], ".source#Dimensions x PixelSize")
+            s.add(
+                "volume_dims_a",
+                [float(p[k]) * acq_pix for k in ("DimensionsX", "DimensionsY", "DimensionsZ")],
+                ".source#Dimensions x PixelSize",
+            )
         if "DosePerAngstromFrame" in p:
             s.add("exposure_per_tilt", -float(p["DosePerAngstromFrame"]), ".source#DosePerAngstromFrame")
     if s.tomostar_dir is None:
@@ -196,9 +209,10 @@ def discover_series(
 
     # explicit overrides for the XML reader
     if volume_px is not None:
-        if pix is None and acq_pix is None:
+        box_pix = acq_pix or pix
+        if box_pix is None:
             raise ValueError("--volume-px needs the acquisition pixel size (settings or --pix)")
-        s.add("volume_dims_a", [v * (acq_pix or pix) for v in volume_px], "--volume-px x pixel", override=True)
+        s.add("volume_dims_a", [v * box_pix for v in volume_px], "--volume-px x pixel", override=True)
 
     tomostar_path = s.tomostar_dir / f"{stem}.tomostar" if s.tomostar_dir else None
     if tomostar_path and tomostar_path.exists():

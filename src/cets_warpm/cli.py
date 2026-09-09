@@ -26,8 +26,30 @@ from cets_warpm.from_cets import cets_to_warp
 from cets_warpm.to_cets import warp_to_cets
 
 PACKAGE = "cets-warpm"
-TO_CETS_OPTIONS = {"pix", "image_px", "volume_px", "drop_locals", "no_ctf", "paths", "voltage", "cs", "amp_contrast", "dose_per_tilt", "settings"}
-FROM_CETS_OPTIONS = {"pix", "frames_dir", "tomo_size", "dose_per_tilt", "voltage", "cs", "amp_contrast", "angles_inverted", "no_ctf"}
+TO_CETS_OPTIONS = {
+    "pix",
+    "image_px",
+    "volume_px",
+    "drop_locals",
+    "no_ctf",
+    "paths",
+    "voltage",
+    "cs",
+    "amp_contrast",
+    "dose_per_tilt",
+    "settings",
+}
+FROM_CETS_OPTIONS = {
+    "pix",
+    "frames_dir",
+    "tomo_size",
+    "dose_per_tilt",
+    "voltage",
+    "cs",
+    "amp_contrast",
+    "angles_inverted",
+    "no_ctf",
+}
 
 
 @click.group()
@@ -38,19 +60,30 @@ def main():
 
 @main.command("to-cets")
 @click.argument("sources", nargs=-1, required=True)
-@click.option("-o", "--output", "output", required=True, type=click.Path(dir_okay=False), help="CETS dataset JSON to write.")
+@click.option(
+    "-o", "--output", "output", required=True, type=click.Path(dir_okay=False), help="CETS dataset JSON to write."
+)
 @click.option("--name", default=None, help="Dataset name (default: the output stem).")
-@click.option("--settings", type=click.Path(exists=True, dir_okay=False), default=None, help="warp_tiltseries.settings to use for every XML.")
+@click.option(
+    "--settings",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="warp_tiltseries.settings to use for every XML.",
+)
 @click.option("--pix", type=float, default=None, help="Tilt-image (frame average) pixel size Å/px.")
 @click.option("--image-px", "image_px", default=None, help="Tilt image size WxH (re-saved XMLs carry zeros).")
 @click.option("--volume-px", "volume_px", default=None, help="Reconstruction box XxYxZ in acquisition pixels.")
-@click.option("--drop-locals", "drop_locals", is_flag=True, default=None, help="Keep the rigid part of a deformed series.")
+@click.option(
+    "--drop-locals", "drop_locals", is_flag=True, default=None, help="Keep the rigid part of a deformed series."
+)
 @click.option("--no-ctf", "no_ctf", is_flag=True, default=None)
 @click.option("--paths", type=click.Choice(["relative", "absolute"]), default=None)
 @click.option("--voltage", type=float, default=None, help="kV (companion only).")
 @click.option("--cs", type=float, default=None, help="mm (companion only).")
 @click.option("--amp-contrast", "amp_contrast", type=float, default=None)
-@click.option("--dose-per-tilt", "dose_per_tilt", type=float, default=None, help="Per-image exposure e/Å² (companion only).")
+@click.option(
+    "--dose-per-tilt", "dose_per_tilt", type=float, default=None, help="Per-image exposure e/Å² (companion only)."
+)
 @common_options
 def to_cets(sources, output, name, config_path, overwrite, fail_fast, **cli):
     """Convert Warp tilt series (project root, .settings, .xml, M .source/.population) to a CETS dataset."""
@@ -107,12 +140,30 @@ def to_cets(sources, output, name, config_path, overwrite, fail_fast, **cli):
 @click.option("-o", "--output", "output", required=True, type=click.Path(file_okay=False), help="Warp project root.")
 @selection_options
 @click.option("--pix", type=float, default=None, help="Acquisition pixel size Å/px (settings Import/PixelSize).")
-@click.option("--frames-dir", "frames_dir", type=click.Path(file_okay=False), default=None, help="Where the movies will live [ROOT/frames].")
-@click.option("--dose-per-tilt", "dose_per_tilt", type=float, default=None, help="Exposure per tilt e/Å² (settings DosePerAngstromFrame).")
+@click.option(
+    "--frames-dir",
+    "frames_dir",
+    type=click.Path(file_okay=False),
+    default=None,
+    help="Where the movies will live [ROOT/frames].",
+)
+@click.option(
+    "--dose-per-tilt",
+    "dose_per_tilt",
+    type=float,
+    default=None,
+    help="Exposure per tilt e/Å² (settings DosePerAngstromFrame).",
+)
 @click.option("--voltage", type=float, default=None)
 @click.option("--cs", type=float, default=None)
 @click.option("--amp-contrast", "amp_contrast", type=float, default=None)
-@click.option("--angles-inverted", "angles_inverted", is_flag=True, default=None, help="Warp AreAnglesInverted (defocus handedness).")
+@click.option(
+    "--angles-inverted",
+    "angles_inverted",
+    is_flag=True,
+    default=None,
+    help="Warp AreAnglesInverted (defocus handedness).",
+)
 @click.option("--no-ctf", "no_ctf", is_flag=True, default=None)
 @common_options
 def from_cets(document, output, regions, alignment, tomogram, config_path, overwrite, fail_fast, **cli):
@@ -133,8 +184,15 @@ def from_cets(document, output, regions, alignment, tomogram, config_path, overw
         try:
             res = make_resolver(PACKAGE, "from-cets", flags, config, region.id, sr)
             cets_to_warp(
-                region, res, sr, root=root, doc_dir=doc.parent, companion=companion,
-                alignment_selector=parse_alignment_selector(alignment), tomogram_selector=tomogram, overwrite=overwrite,
+                region,
+                res,
+                sr,
+                root=root,
+                doc_dir=doc.parent,
+                companion=companion,
+                alignment_selector=parse_alignment_selector(alignment),
+                tomogram_selector=tomogram,
+                overwrite=overwrite,
             )
         except Exception as e:  # noqa: BLE001
             sr.error = str(e)
