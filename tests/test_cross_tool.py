@@ -1,4 +1,4 @@
-"""X1: a real AreTomo3 .aln encoded into CETS by the codec, written as a Warp project by cets-warpm, loaded by
+"""A real AreTomo3 .aln encoded into CETS by the codec, written as a Warp project by cets-warpm, loaded by
 arewarpion's INDEPENDENT Warp model, must project 3D points like arewarpion's AreTomo3 model of the source
 .aln (float32 warpylib: 1e-2 Å)."""
 
@@ -26,7 +26,7 @@ ALN = Path("/hpc/projects/group.czii/utz.ermel/repos/arewarpo/testdata_runs/at3_
 
 
 @pytest.mark.skipif(not ALN.exists(), reason="real AreTomo3 run not available")
-def test_x1_aretomo3_to_cets_to_warp_projects_identically(tmp_path):
+def test_aretomo3_to_cets_to_warp_projects_identically(tmp_path):
     aln = AreTomo3ALN.from_file(ALN)
     s, vol = 1.54, (4096, 4096, 2000)
     hub = Alignment.from_aretomo3(aln, vol_size_px=vol, pixel_size_a=s)
