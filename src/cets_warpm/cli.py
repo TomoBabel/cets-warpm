@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import click
+from cryoet_alignment.io.cets.alignment import select_alignment, select_tomogram
 from cryoet_alignment.io.cets.cli_support import (
     Report,
     SeriesReport,
@@ -23,6 +24,7 @@ from cryoet_alignment.io.cets.entities import dataset_entity, dump_json, load_da
 from cets_warpm import __version__
 from cets_warpm.discover import discover_series, enumerate_xmls
 from cets_warpm.from_cets import cets_to_warp
+from cets_warpm.particles import collect_for_export, import_star, write_stars
 from cets_warpm.to_cets import warp_to_cets
 
 PACKAGE = "cets-warpm"
@@ -38,6 +40,11 @@ TO_CETS_OPTIONS = {
     "amp_contrast",
     "dose_per_tilt",
     "settings",
+    "star_flavour",
+    "coords_angpix",
+    "angpix_shifts",
+    "particles_tomogram",
+    "skip_unknown_series",
 }
 FROM_CETS_OPTIONS = {
     "pix",
@@ -49,13 +56,16 @@ FROM_CETS_OPTIONS = {
     "amp_contrast",
     "angles_inverted",
     "no_ctf",
+    "star_flavour",
+    "coords_angpix",
+    "series_name_style",
 }
 
 
 @click.group()
 @click.version_option(__version__)
 def main():
-    """Warp / M <-> CETS (rigid profile cets-rigid/0.1)."""
+    """Warp / M <-> CETS (rigid profile cets-rigid/0.2: tilt-series alignments and particle annotations)."""
 
 
 @main.command("to-cets")
@@ -89,14 +99,43 @@ def main():
 @click.option(
     "--dose-per-tilt", "dose_per_tilt", type=float, default=None, help="Per-image exposure e/Å² (companion only)."
 )
+@click.option(
+    "--particles",
+    "particles",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Particle star(s) to convert to annotations (Warp import, M species import or RELION 5 flavour).",
+)
+@click.option(
+    "--star-flavour",
+    "star_flavour",
+    type=click.Choice(["auto", "warp", "m", "relion5"]),
+    default=None,
+    help="Column/unit convention of the stars [auto, warned].",
+)
+@click.option("--coords-angpix", "coords_angpix", type=float, default=None, help="Pixel size of rlnCoordinate* (Å).")
+@click.option("--angpix-shifts", "angpix_shifts", type=float, default=None, help="Pixel size of rlnOriginX/Y/Z (Å).")
+@click.option(
+    "--particles-tomogram",
+    "particles_tomogram",
+    default=None,
+    help="Tomogram id the annotations bind to (default: the region's <stem>_volume).",
+)
+@click.option(
+    "--skip-unknown-series",
+    "skip_unknown_series",
+    is_flag=True,
+    default=None,
+    help="Drop star rows whose series is not in the document instead of failing.",
+)
 @common_options
-def to_cets(sources, output, name, config_path, overwrite, fail_fast, **cli):
+def to_cets(sources, output, name, config_path, overwrite, fail_fast, particles, **cli):
     """Convert Warp tilt series (project root, .settings, .xml, M .source/.population) to a CETS dataset."""
     out = Path(output)
     if out.exists() and not overwrite:
         raise click.ClickException(f"{out} exists (use --overwrite)")
     out.parent.mkdir(parents=True, exist_ok=True)
-    config = load_config(config_path, TO_CETS_OPTIONS)
+    config = load_config(config_path, TO_CETS_OPTIONS, PACKAGE, "to-cets")
     flags = {k: v for k, v in cli.items() if v is not None}
     image_px = parse_size(flags.pop("image_px", None), 2, "image-px")
     volume_px = parse_size(flags.pop("volume_px", None), 3, "volume-px")
@@ -130,6 +169,26 @@ def to_cets(sources, output, name, config_path, overwrite, fail_fast, **cli):
         companion.tilt_series[series.stem] = result.tilt_series_companion
         companion.alignments.append(result.alignment_companion)
         companion.tomograms.update(result.tomogram_companions)
+        print_series(sr)
+    by_stem = {r.id: r for r in regions}
+    particle_tomogram = flags.pop("particles_tomogram", None)
+    for star in particles:
+        star = Path(star)
+        sr = SeriesReport(f"particles:{star.name}")
+        report.series.append(sr)
+        try:
+            res = make_resolver(PACKAGE, "to-cets", flags, config, None, sr)
+            imp = import_star(star, by_stem, res, sr, tomogram_selector=particle_tomogram)
+        except Exception as e:  # noqa: BLE001
+            sr.error = str(e)
+            print_series(sr)
+            if fail_fast:
+                break
+            continue
+        for stem, anns in imp.annotations.items():
+            by_stem[stem].annotations = list(by_stem[stem].annotations or []) + anns
+        companion.annotations.update(imp.companions)
+        sr.outputs["annotations"] = ", ".join(sorted(imp.companions))
         print_series(sr)
     if regions:
         ds = dataset_entity(name or out.name.split(".")[0], regions)
@@ -176,17 +235,66 @@ def to_cets(sources, output, name, config_path, overwrite, fail_fast, **cli):
     help="Warp AreAnglesInverted (defocus handedness).",
 )
 @click.option("--no-ctf", "no_ctf", is_flag=True, default=None, help="Do not write CTF grids.")
+@click.option(
+    "--particles-out",
+    "particles_out",
+    type=click.Path(file_okay=False),
+    default=None,
+    help="Write the point annotations as particle star(s) into this directory.",
+)
+@click.option(
+    "--star-flavour",
+    "star_flavour",
+    type=click.Choice(["warp", "m", "relion5"]),
+    default=None,
+    help="Target star convention (required with --particles-out).",
+)
+@click.option(
+    "--coords-angpix",
+    "coords_angpix",
+    type=float,
+    default=None,
+    help="Pixel size of the written rlnCoordinate* [the bound tomogram's voxel size, warned].",
+)
+@click.option("--per-series", "per_series", is_flag=True, help="One star per tilt series instead of one per document.")
+@click.option(
+    "--annotation",
+    "annotations",
+    multiple=True,
+    help="Annotation id(s) to export (default: all bound to the reference tomogram).",
+)
+@click.option(
+    "--series-name-style",
+    "series_name_style",
+    type=click.Choice(["tomostar", "stem"]),
+    default=None,
+    help="rlnMicrographName / rlnTomoName value: <stem>.tomostar (Warp/M) or the bare stem [tomostar].",
+)
 @common_options
-def from_cets(document, output, regions, alignment, tomogram, config_path, overwrite, fail_fast, **cli):
+def from_cets(
+    document,
+    output,
+    regions,
+    alignment,
+    tomogram,
+    config_path,
+    overwrite,
+    fail_fast,
+    particles_out,
+    per_series,
+    annotations,
+    **cli,
+):
     """Write a Warp project (settings, tomostar, rigid tilt-series XML) for the regions of a CETS dataset."""
     doc = Path(document)
     ds = load_dataset(doc)
     companion = Companion.load_for(doc)
     root = Path(output)
-    config = load_config(config_path, FROM_CETS_OPTIONS)
+    config = load_config(config_path, FROM_CETS_OPTIONS, PACKAGE, "from-cets")
     flags = {k: v for k, v in cli.items() if v is not None}
     report = Report(PACKAGE, "from-cets")
     wanted = set(regions)
+    selections = []
     for region in ds.regions:
         if wanted and region.id not in wanted:
             continue
@@ -205,11 +313,33 @@ def from_cets(document, output, regions, alignment, tomogram, config_path, overw
                 tomogram_selector=tomogram,
                 overwrite=overwrite,
             )
+            if particles_out:
+                cets_alignment = select_alignment(region, parse_alignment_selector(alignment))
+                ref = select_tomogram(region, cets_alignment, tomogram, companion)
+                selections += collect_for_export(region, ref, companion, sr, annotation_ids=list(annotations))
         except Exception as e:  # noqa: BLE001
             sr.error = str(e)
         print_series(sr)
         if sr.error and fail_fast:
             break
+    if particles_out:
+        sr = SeriesReport("particles")
+        report.series.append(sr)
+        try:
+            res = make_resolver(PACKAGE, "from-cets", flags, config, None, sr)
+            write_stars(
+                selections,
+                res,
+                sr,
+                out_dir=Path(particles_out),
+                doc_stem=doc.name.split(".")[0],
+                per_series=bool(per_series),
+                settings_path=root / "warp_tiltseries.settings",
+                overwrite=overwrite,
+            )
+        except Exception as e:  # noqa: BLE001
+            sr.error = str(e)
+        print_series(sr)
     root.mkdir(parents=True, exist_ok=True)
     finish(report, root / "cets_warpm.report.json")
 

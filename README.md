@@ -9,8 +9,9 @@ level angles and the per-tilt CTF. Deformation grids that vary in space are refu
 drop them. Grids that are constant are rigid contributions and are folded into the shifts, never dropped.
 
 - `cets-warpm to-cets` reads a Warp project, single XMLs, or an M `.source` / `.population`, and writes
-  one CETS dataset.
-- `cets-warpm from-cets` writes a Warp project (settings, tomostars, tilt-series XMLs) from a CETS dataset.
+  one CETS dataset. Particle stars given with `--particles` become point annotations of the same document.
+- `cets-warpm from-cets` writes a Warp project (settings, tomostars, tilt-series XMLs) from a CETS dataset,
+  and with `--particles-out` the document's point annotations as a particle star for Warp, M or RELION 5.
 
 M refines the same `warp_tiltseries/<stem>.xml` files, so an M population is converted by enumerating
 its sources; the geometry always comes from the XMLs.
@@ -231,6 +232,81 @@ cets-warpm from-cets cets/10445.cets.json -o warp_out/ --region TS_105_5 --align
 cets-warpm from-cets cets/at3.cets.json -o warp_out/ --config cets.yaml
 ```
 
+## Particles
+
+Point annotations of a CETS document (`PointSet3D`, `PointMatrixSet3D`) live in the centred physical frame
+of one tomogram. `cets-warpm` exchanges them with three particle-star flavours, each pinned to the program
+that reads it:
+
+| flavour | consumer | coordinates | orientations |
+|---|---|---|---|
+| `warp` | `WarpTools ts_export_particles --input_star` | `rlnCoordinateX/Y/Z` in pixels of `--coords_angpix`, corner of the Warp box; `rlnOriginX/Y/Z` (px) or `rlnOrigin*Angst` subtracted | `rlnAngleRot/Tilt/Psi` |
+| `m` | `MTools create_species --particles_relion` | the same, pixel size from `rlnDetectorPixelSize/rlnMagnification`, then `rlnImagePixelSize`, then `--angpix_coords` | `rlnAngleRot/Tilt/Psi` |
+| `relion5` | RELION 5 tomo | `rlnCenteredCoordinate*Angst` (float box centre) or legacy `rlnCoordinate*` in `rlnTomoTiltSeriesPixelSize` pixels, `rlnOrigin*Angst` rotated by the subtomogram angles | `rlnAngleRot/Tilt/Psi` (+ `rlnTomoSubtomogram*`) |
+
+Rows are assigned to tilt series by `rlnMicrographName` / `rlnTomoName` (basename, `.tomostar` stripped).
+Orientation matrices are RELION's `A(rot, tilt, psi)`, which is Warp's `Matrix3.Euler`: the rotation that
+maps the reference map into the tomogram. `rlnRandomSubset`, `rlnClassNumber`, `rlnGroupNumber`,
+`rlnTomoParticleId/Name` and `rlnOpticsGroup` travel through the companion and come back on export.
+
+### Stars to CETS
+
+```
+picks/
+├── template_matches.star            ← Warp import star: rlnMicrographName=<stem>.tomostar, rlnCoordinateX/Y/Z, (rlnAngleRot/Tilt/Psi)
+└── run_data.star                    ← RELION 5 refined star: rlnTomoName, rlnCoordinate* + rlnOrigin*Angst, data_optics
+```
+
+```bash
+# Warp import stars carry no pixel size: say what the coordinates are in
+cets-warpm to-cets warp/ --particles picks/template_matches.star --coords-angpix 10.0 -o cets/warp.cets.json
+
+# a RELION 5 star as RELION reads it (tilt-series pixel), or as M would read it (rlnImagePixelSize)
+cets-warpm to-cets warp/ --particles refine/run_data.star -o cets/warp.cets.json
+cets-warpm to-cets warp/ --particles refine/run_data.star --star-flavour m -o cets/warp.cets.json
+
+# rows of series that are not in the project: drop instead of failing
+cets-warpm to-cets warp/ --particles all_picks.star --coords-angpix 10.0 --skip-unknown-series -o cets/warp.cets.json
+```
+
+Each star adds one annotation per tilt series it mentions, bound to that region's Warp box
+(`<stem>_volume`, or `--particles-tomogram`), with the id `<stem>_volume_ann_<star stem>`. The report lists
+the pixel size used and its origin, the rows bound, and how many points lie outside the box:
+
+```
+== particles:template_matches.star
+   star_flavour = 'auto'  [absent]
+   coords_angpix = 10.0  [cli]
+   coords_angpix_used = 10.0  [discovered]  (explicit (warp flavour))
+   points_inside_box = '412/412'  [discovered]  (corner-anchored box of the bound tomogram)
+   [ok ] rows_bound value=412 expected=412
+   annotations: Position_16_3_volume_ann_template_matches
+```
+
+### CETS to stars
+
+```bash
+cets-warpm from-cets cets/10445.cets.json -o warp_out/ --particles-out warp_out/particles --star-flavour warp --coords-angpix 4.99
+cets-warpm from-cets cets/10445.cets.json -o warp_out/ --particles-out warp_out/particles --star-flavour m --per-series
+cets-warpm from-cets cets/x.cets.json -o warp_out/ --particles-out warp_out/particles --star-flavour relion5 --annotation TS_01_volume_ann_picks
+```
+
+```
+warp_out/
+├── particles/
+│   └── 10445_warp.star              # one row per point of every exported annotation (or one star per series)
+└── cets_warpm.report.json           # + star_roundtrip gates and the ts_export_particles / create_species line
+```
+
+Exported are the point annotations bound to the reference tomogram of each region's alignment (an annotation
+bound to another tomogram of the same extent is converted through the shared centred frame with a note;
+masks and other annotation kinds are skipped with a note). The written star is re-read and must reproduce the
+document (`star_roundtrip_positions`, `star_roundtrip_rotations`). The hint carries the pixel size to pass:
+
+```
+> WarpTools ts_export_particles --settings warp_out/warp_tiltseries.settings --input_star warp_out/particles/10445_warp.star --coords_angpix 4.99 --output_star ... --box <px> --diameter <A> --2d
+```
+
 ## Command reference
 
 ### `cets-warpm to-cets`
@@ -255,6 +331,12 @@ cets-warpm to-cets [OPTIONS] SOURCES...
 | `--paths relative\|absolute` | how file paths are written into the document | `relative`, with a warning |
 | `--voltage kV`, `--cs mm`, `--amp-contrast F` | companion values only | settings / XML CTF constants |
 | `--dose-per-tilt D` | per-image exposure (e/Å²), companion only | settings `DosePerAngstromFrame` |
+| `--particles STAR` | particle star(s) to convert to annotations; repeatable | none |
+| `--star-flavour auto\|warp\|m\|relion5` | column/unit convention of the stars | `auto` from the columns (`warp` and `m` share theirs) |
+| `--coords-angpix Å` | pixel size of `rlnCoordinate*` | `rlnDetectorPixelSize/rlnMagnification`, then `rlnImagePixelSize`, relion5: `rlnTomoTiltSeriesPixelSize`; a `warp` star without any → error |
+| `--angpix-shifts Å` | pixel size of `rlnOriginX/Y/Z` (M) | the coordinate pixel |
+| `--particles-tomogram ID` | tomogram the annotations bind to | the region's `<stem>_volume` |
+| `--skip-unknown-series` | drop rows whose series is not in the document | off: error listing the names |
 | `--fail-fast` | stop at the first failing series | continue, exit 1 at the end |
 | `--overwrite` | replace existing outputs | error when outputs exist |
 | `--config FILE` | YAML config with overrides (see below) | |
@@ -279,6 +361,12 @@ cets-warpm from-cets [OPTIONS] DOCUMENT
 | `--voltage kV`, `--cs mm`, `--amp-contrast F` | settings CTF constants | companion; error otherwise |
 | `--angles-inverted` | Warp `AreAnglesInverted` (defocus handedness) | companion; off otherwise |
 | `--no-ctf` | do not write CTF grids | off |
+| `--particles-out DIR` | write the point annotations as particle star(s) | none: annotations are not exported |
+| `--star-flavour warp\|m\|relion5` | target convention (required with `--particles-out`) | error |
+| `--coords-angpix Å` | pixel size of the written `rlnCoordinate*` (warp/m) and of the relion5 optics | the bound tomogram's voxel size, with a warning |
+| `--per-series` | one star per tilt series | one star per document |
+| `--annotation ID` | annotation id(s) to export; repeatable | all point annotations bound to the reference tomogram |
+| `--series-name-style tomostar\|stem` | `rlnMicrographName` / `rlnTomoName` value | `tomostar` (`<stem>.tomostar`, what Warp and M require), with a warning |
 | `--fail-fast`, `--overwrite`, `--config FILE` | as above | |
 
 ## Values, defaults and the config file
@@ -301,8 +389,8 @@ cets:                          # every package and command
   amp_contrast: 0.07
   paths: relative
 cets-warpm:
-  to-cets: {drop_locals: false}
-  from-cets: {frames_dir: /data/frames, dose_per_tilt: 3.87, angles_inverted: false}
+  to-cets: {drop_locals: false, coords_angpix: 10.0}
+  from-cets: {frames_dir: /data/frames, dose_per_tilt: 3.87, angles_inverted: false, star_flavour: warp, coords_angpix: 4.99}
 series:                        # per tilt series; wins over the command section
   TS_01: {pix: 1.54, image_px: 4096x4096, volume_px: 4096x4096x2000}
 ```
@@ -319,6 +407,10 @@ cets-warpm to-cets warp/ -o cets/warp.cets.json --config cets.yaml
 - On export, a second series whose settings disagree with the project's settings file.
 - `GridAngleX/Y/Z` (particle-orientation grids) are recorded in the companion, not converted.
 - `AreAnglesInverted` is carried, never applied: it affects Warp's defocus channel, not the geometry.
+- Star rows of tilt series that are not in the document, unless `--skip-unknown-series`.
+- A `warp`-flavour star without a pixel size column and without `--coords-angpix`.
+- On export, an annotation bound to a tomogram whose extent differs from the reference tomogram's.
+- Grid offsets between reconstruction engines are not modelled: every tomogram grid is taken as corner-anchored.
 
 ## Development
 
