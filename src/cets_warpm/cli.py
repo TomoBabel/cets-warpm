@@ -76,11 +76,16 @@ def main():
 @click.option(
     "--drop-locals", "drop_locals", is_flag=True, default=None, help="Keep the rigid part of a deformed series."
 )
-@click.option("--no-ctf", "no_ctf", is_flag=True, default=None)
-@click.option("--paths", type=click.Choice(["relative", "absolute"]), default=None)
+@click.option("--no-ctf", "no_ctf", is_flag=True, default=None, help="Ignore the CTF values.")
+@click.option(
+    "--paths",
+    type=click.Choice(["relative", "absolute"]),
+    default=None,
+    help="How file paths are written into the document [relative, warned].",
+)
 @click.option("--voltage", type=float, default=None, help="kV (companion only).")
 @click.option("--cs", type=float, default=None, help="mm (companion only).")
-@click.option("--amp-contrast", "amp_contrast", type=float, default=None)
+@click.option("--amp-contrast", "amp_contrast", type=float, default=None, help="Amplitude contrast (companion only).")
 @click.option(
     "--dose-per-tilt", "dose_per_tilt", type=float, default=None, help="Per-image exposure e/Å² (companion only)."
 )
@@ -154,9 +159,15 @@ def to_cets(sources, output, name, config_path, overwrite, fail_fast, **cli):
     default=None,
     help="Exposure per tilt e/Å² (settings DosePerAngstromFrame).",
 )
-@click.option("--voltage", type=float, default=None)
-@click.option("--cs", type=float, default=None)
-@click.option("--amp-contrast", "amp_contrast", type=float, default=None)
+@click.option("--voltage", type=float, default=None, help="kV (settings CTF/Voltage; default: companion).")
+@click.option("--cs", type=float, default=None, help="mm (settings CTF/Cs; default: companion).")
+@click.option(
+    "--amp-contrast",
+    "amp_contrast",
+    type=float,
+    default=None,
+    help="Amplitude contrast (settings CTF/Amplitude; default: companion).",
+)
 @click.option(
     "--angles-inverted",
     "angles_inverted",
@@ -164,7 +175,7 @@ def to_cets(sources, output, name, config_path, overwrite, fail_fast, **cli):
     default=None,
     help="Warp AreAnglesInverted (defocus handedness).",
 )
-@click.option("--no-ctf", "no_ctf", is_flag=True, default=None)
+@click.option("--no-ctf", "no_ctf", is_flag=True, default=None, help="Do not write CTF grids.")
 @common_options
 def from_cets(document, output, regions, alignment, tomogram, config_path, overwrite, fail_fast, **cli):
     """Write a Warp project (settings, tomostar, rigid tilt-series XML) for the regions of a CETS dataset."""
