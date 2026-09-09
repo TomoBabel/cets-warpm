@@ -127,8 +127,11 @@ def warp_to_cets(s: WarpSeries, res: Resolver, sr: SeriesReport, *, out_dir: Pat
             sr.warnings.append(f"{rec.name}: unreadable header ({e})")
             continue
         implied = volume_dims_a[0] / h["nx"]
+        header_voxel = round(h["voxel"][0], 6) if h["voxel"][0] > 0 else implied  # float32 header
+        if abs(header_voxel - implied) > 1e-3 * implied:
+            sr.warnings.append(f"{rec.name}: header voxel {header_voxel:.5f} Å differs from the box-implied value {implied:.5f} Å; the header value is used")
         tomo = tomogram_entity(tomogram_id=f"{stem}_tomo_{h['voxel'][0]:.3f}", path=_rel(rec, out_dir, paths_mode),
-                               size_px=(h["nx"], h["ny"], h["nz"]), voxel_size_a=implied, tilt_series_id=stem)
+                               size_px=(h["nx"], h["ny"], h["nz"]), voxel_size_a=float(header_voxel), tilt_series_id=stem)
         tomograms.append(tomo)
         tomo_comp[tomo.id] = TomogramCompanion(voxel_header_a=h["voxel"][0], voxel_implied_a=implied,
                                                reconstruction_software="Warp", source_ref=rec.name)
